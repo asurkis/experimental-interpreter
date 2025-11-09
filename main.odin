@@ -123,19 +123,107 @@ read_uint :: proc "contextless" (
 	return
 }
 
-// interpret_array :: proc(
-// 	err_log: ^strings.Builder,
-// 	text: Text,
-// 	cursor: [2]int,
-// ) -> (
-// 	out_cursor: [2]int,
-// 	out: i64,
-// 	out_ok: bool,
-// ) {
-// 	cursor1, ch1 := next_rune(text, cursor)
-// 	assert(ch1 == '(')
-// 	return
-// }
+interpret_array :: proc(
+	err_log: ^strings.Builder,
+	text: Text,
+	cursor: [2]int,
+) -> (
+	out_cursor: [2]int,
+	out: i64,
+	out_ok: bool,
+) {
+	cursor1, ch1 := next_rune(text, cursor)
+	assert(ch1 == '(')
+	out_cursor = cursor1
+	operation: rune
+	is_first := true
+	out_ok = true
+	for {
+		cursor2 := skip_spaces(text, out_cursor)
+		cursor3, ch3 := next_rune(text, cursor2)
+		if ch3 == -1 {
+			fmt.sbprintln(err_log, "Unexpected EOF at", cursor3.y + 1, ":", cursor3.x + 1)
+			fmt.sbprintln(err_log, "Unbalanced ( at", cursor.y + 1, ":", cursor.x + 1)
+			return cursor3, 0, false
+		} else if ch3 == ')' {
+			if operation == 0 {
+				fmt.sbprintln(
+					err_log,
+					"Empty arrays are not supported at",
+					cursor.y + 1,
+					":",
+					cursor.x + 1,
+				)
+				return cursor3, 0, false
+			} else {
+				return cursor3, out, out_ok
+			}
+		} else if operation == 0 {
+			if ch3 == '(' {
+				fmt.sbprintln(
+					err_log,
+					"Array operators are not supported at",
+					cursor2.y + 1,
+					":",
+					cursor2.x + 1,
+				)
+				return cursor2, 0, false
+			} else {
+				cursor4, word := next_word(text, cursor2)
+				out_cursor = cursor4
+				switch word {
+				case "":
+					fmt.sbprintln(
+						err_log,
+						"Operator must be a word at",
+						cursor2.y + 1,
+						":",
+						cursor2.x + 1,
+					)
+					out_ok = false
+				case "+":
+					operation = '+'
+				case "-":
+					operation = '-'
+				case "*":
+					operation = '*'
+				case "/":
+					operation = '/'
+				case:
+					fmt.sbprintln(
+						err_log,
+						"Unknown operator",
+						word,
+						"at",
+						cursor2.y + 1,
+						":",
+						cursor2.x + 1,
+					)
+					out_ok = false
+				}
+			}
+		} else {
+			cursor4, x, ok := interpret(err_log, text, cursor2)
+			out_cursor = cursor4
+			out_ok &= ok
+			if out_ok {
+				if is_first {
+					out = x
+					is_first = false
+				} else do switch operation {
+				case '+':
+					out = out + x
+				case '-':
+					out = out - x
+				case '*':
+					out = out * x
+				case '/':
+					out = out / x
+				}
+			}
+		}
+	}
+}
 
 interpret :: proc(
 	err_log: ^strings.Builder,
@@ -152,7 +240,7 @@ interpret :: proc(
 	case -1:
 		fmt.sbprintln(err_log, "Unexpected EOF")
 	case '(':
-	// return interpret_array(err_log, text, cursor1)
+		return interpret_array(err_log, text, cursor1)
 	case ')':
 		fmt.sbprintln(err_log, "Unbalanced ) at", cursor1.y + 1, ":", cursor1.x + 1)
 		out_cursor = cursor1
@@ -199,7 +287,7 @@ main :: proc() {
 		delete(main_text)
 	}
 	append(&main_text, make([dynamic]byte))
-	append(&main_text[0], "Hello, world!")
+	append(&main_text[0], "(+ 1 1)")
 
 	for !rl.WindowShouldClose() {
 		read_char := false
@@ -320,6 +408,7 @@ main :: proc() {
 			}
 			last_err = strings.to_cstring(&err_log)
 			last_ok = ok
+			text_updated = false
 		}
 
 		rl.BeginDrawing()
