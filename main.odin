@@ -4,62 +4,57 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
-import rl "vendor:raylib"
+import sdl "vendor:sdl3"
 
 Text :: [dynamic][dynamic]byte
 
-draw_cursor :: proc(font: rl.Font, pos: [2]f32, padding: int, font_size: f32) {
-	scale := font_size / f32(font.baseSize)
-	space_idx := rl.GetGlyphIndex(font, ' ')
-	step_x := f32(font.glyphs[space_idx].advanceX)
-	if step_x == 0 do step_x = font.recs[space_idx].width
-	rec := rl.Rectangle {
-		x      = pos.x + f32(padding) * (step_x * scale + scale + 3) - 1,
-		y      = pos.y - 1,
-		width  = 2,
-		height = font_size + 2,
+renderer: ^sdl.Renderer
+
+draw_cursor :: proc(pos: [2]f32, padding: int) {
+	rect := sdl.FRect {
+		x = pos.x + f32(padding) * 8 - 1,
+		y = pos.y - 1,
+		w = 2,
+		h = 10,
 	}
-	rl.DrawRectangleRec(rec, rl.BLACK)
+	sdl.RenderRect(renderer, &rect)
 }
 
 draw_text_and_cursor :: proc(text: Text, cursor: [2]int) {
-	font := rl.GetFontDefault()
+	TOPLEFT :: 8
 	offset: [2]f32
-	TOPLEFT :: 32
-	FONT_SIZE :: 30
-
-	scale := FONT_SIZE / f32(font.baseSize)
-	step_y := f32(FONT_SIZE + 2)
 
 	for line, row in text {
 		for col := 0; col < len(line); {
 			ch, ch_sz := utf8.decode_rune(line[col:])
 			defer col += ch_sz
 			if row == cursor.y && col == cursor.x {
-				draw_cursor(font, TOPLEFT + offset, 0, FONT_SIZE)
+				draw_cursor(TOPLEFT + offset, 0)
 			}
 
-			ch_idx := rl.GetGlyphIndex(font, ch)
-			offset.x += 3
 			if ch != ' ' && ch != '\t' {
-				rl.DrawTextCodepoint(font, ch, TOPLEFT + offset, FONT_SIZE, rl.BLACK)
+				ch0: [5]byte
+				for i in 0 ..< ch_sz {
+					ch0[i] = line[col + i]
+				}
+				ch_cstr := cast(cstring)cast([^]byte)raw_data(ch0[:])
+				xy := TOPLEFT + offset
+				sdl.RenderDebugText(renderer, xy.x, xy.y, ch_cstr)
 			}
-			step := f32(font.glyphs[ch_idx].advanceX)
-			if step == 0 do step = font.recs[ch_idx].width
-			offset.x += step * scale + scale
+			offset.x += 8
 		}
 		if row == cursor.y && len(line) <= cursor.x {
-			draw_cursor(font, TOPLEFT + offset, cursor.x - len(line), FONT_SIZE)
+			draw_cursor(TOPLEFT + offset, cursor.x - len(line))
 		}
 
 		offset.x = 0
-		offset.y += step_y
+		offset.y += 8
 	}
 	if len(text) <= cursor.y {
 		pos: [2]f32
 		pos += TOPLEFT
-		pos.y += f32(cursor.y) * step_y
-		draw_cursor(font, pos, cursor.x, FONT_SIZE)
+		pos.y += f32(cursor.y) * 8
+		draw_cursor(pos, cursor.x)
 	}
 }
 
@@ -263,8 +258,17 @@ interpret :: proc(
 }
 
 main :: proc() {
-	rl.InitWindow(1280, 720, "Main window")
-	defer rl.CloseWindow()
+	ok: bool
+	ok = sdl.Init(sdl.INIT_EVENTS | sdl.INIT_VIDEO)
+	assert(ok)
+	window := sdl.CreateWindow("Main window", 1280, 720, {})
+	assert(window != nil)
+	defer sdl.DestroyWindow(window)
+	ok = sdl.StartTextInput(window)
+	assert(ok)
+	renderer = sdl.CreateRenderer(window, nil)
+	assert(renderer != nil)
+	defer sdl.DestroyRenderer(renderer)
 
 	cursor: [2]int
 	main_text: Text
@@ -289,110 +293,110 @@ main :: proc() {
 	append(&main_text, make([dynamic]byte))
 	append(&main_text[0], "(+ 1 1)")
 
-	for !rl.WindowShouldClose() {
-		read_char := false
-		for {
-			ch := rl.GetCharPressed()
-			if ch == 0 do break
-			read_char = true
-			if len(main_text) <= cursor.y {
-				resize(&main_text, cursor.y + 1)
-			}
-			line := &main_text[cursor.y]
-			for len(line^) < cursor.x {
-				append(line, ' ')
-			}
-			ch_arr, ch_sz := utf8.encode_rune(ch)
-			inject_at(line, cursor.x, ..ch_arr[:ch_sz])
-			cursor.x += ch_sz
-			text_updated = true
-		}
-		key_loop: for !read_char {
-			if read_char do break
-			key := rl.GetKeyPressed()
-			#partial switch key {
-			case .KEY_NULL:
-				break key_loop
-			case .LEFT:
-				cursor.x = max(cursor.x - 1, 0)
-			case .RIGHT:
-				cursor.x += 1
-			case .UP:
-				cursor.y = max(cursor.y - 1, 0)
-			case .DOWN:
-				cursor.y += 1
-			case .HOME:
-				cursor.x = 0
-			case .END:
-				if cursor.y < len(main_text) {
-					cursor.x = len(main_text[cursor.y])
-				} else {
+	main_loop: for {
+		ok = sdl.WaitEvent(nil)
+		assert(ok)
+		for evt: sdl.Event; sdl.PollEvent(&evt); {
+			#partial switch evt.type {
+			case .QUIT:
+				break main_loop
+			case .TEXT_INPUT:
+				if len(main_text) <= cursor.y {
+					resize(&main_text, cursor.y + 1)
+				}
+				line := &main_text[cursor.y]
+				for len(line^) < cursor.x {
+					append(line, ' ')
+				}
+				str := transmute([]byte)cast(string)evt.text.text
+				inject_at(line, cursor.x, ..str)
+				cursor.x += len(str)
+				text_updated = true
+			case .KEY_DOWN:
+				switch evt.key.key {
+				case sdl.K_ESCAPE:
+					break main_loop
+				case sdl.K_LEFT:
+					cursor.x = max(cursor.x - 1, 0)
+				case sdl.K_RIGHT:
+					cursor.x += 1
+				case sdl.K_UP:
+					cursor.y = max(cursor.y - 1, 0)
+				case sdl.K_DOWN:
+					cursor.y += 1
+				case sdl.K_HOME:
 					cursor.x = 0
-				}
-			case .ENTER:
-				if cursor.y < len(main_text) {
-					line := &main_text[cursor.y]
-					to_retain := min(cursor.x, len(line^))
-					to_move := max(len(line^) - cursor.x, 0)
-					new_line := make([dynamic]byte, 0, to_move)
-					append(&new_line, ..line^[to_retain:])
-					resize(line, to_retain)
-					inject_at(&main_text, cursor.y + 1, new_line)
-					text_updated = true
-				}
-				cursor.y += 1
-				cursor.x = 0
-			case .BACKSPACE:
-				if cursor.y < len(main_text) && cursor.x <= len(main_text[cursor.y]) {
-					line := &main_text[cursor.y]
-					if cursor.x > 0 {
-						_, ch_sz := utf8.decode_last_rune(line^[:cursor.x])
-						cursor.x -= ch_sz
-						n := len(line^) - ch_sz
-						for i in cursor.x ..< n {
-							line^[i] = line^[i + ch_sz]
-						}
-						resize(line, n)
-						text_updated = true
-					} else if cursor.y > 0 {
-						cursor.y -= 1
-						prev_line := &main_text[cursor.y]
-						cursor.x = len(prev_line^)
-						append(prev_line, ..line^[:])
-						delete(line^)
-						ordered_remove(&main_text, cursor.y + 1)
+				case sdl.K_END:
+					if cursor.y < len(main_text) {
+						cursor.x = len(main_text[cursor.y])
+					} else {
+						cursor.x = 0
+					}
+				case sdl.K_RETURN:
+					if cursor.y < len(main_text) {
+						line := &main_text[cursor.y]
+						to_retain := min(cursor.x, len(line^))
+						to_move := max(len(line^) - cursor.x, 0)
+						new_line := make([dynamic]byte, 0, to_move)
+						append(&new_line, ..line^[to_retain:])
+						resize(line, to_retain)
+						inject_at(&main_text, cursor.y + 1, new_line)
 						text_updated = true
 					}
-				} else {
-					if cursor.x > 0 {
-						cursor.x -= 1
-					} else if cursor.y > 0 {
-						cursor.y -= 1
+					cursor.y += 1
+					cursor.x = 0
+				case sdl.K_BACKSPACE:
+					if cursor.y < len(main_text) && cursor.x <= len(main_text[cursor.y]) {
+						line := &main_text[cursor.y]
+						if cursor.x > 0 {
+							_, ch_sz := utf8.decode_last_rune(line^[:cursor.x])
+							cursor.x -= ch_sz
+							n := len(line^) - ch_sz
+							for i in cursor.x ..< n {
+								line^[i] = line^[i + ch_sz]
+							}
+							resize(line, n)
+							text_updated = true
+						} else if cursor.y > 0 {
+							cursor.y -= 1
+							prev_line := &main_text[cursor.y]
+							cursor.x = len(prev_line^)
+							append(prev_line, ..line^[:])
+							delete(line^)
+							ordered_remove(&main_text, cursor.y + 1)
+							text_updated = true
+						}
+					} else {
+						if cursor.x > 0 {
+							cursor.x -= 1
+						} else if cursor.y > 0 {
+							cursor.y -= 1
+						}
 					}
-				}
-			case .DELETE:
-				if cursor.y < len(main_text) {
-					line := &main_text[cursor.y]
-					if cursor.x < len(line^) {
-						_, ch_sz := utf8.decode_rune(line^[cursor.x:])
-						n := len(line^) - ch_sz
-						for i in cursor.x ..< n {
-							line^[i] = line^[i + ch_sz]
+				case sdl.K_DELETE:
+					if cursor.y < len(main_text) {
+						line := &main_text[cursor.y]
+						if cursor.x < len(line^) {
+							_, ch_sz := utf8.decode_rune(line^[cursor.x:])
+							n := len(line^) - ch_sz
+							for i in cursor.x ..< n {
+								line^[i] = line^[i + ch_sz]
+							}
+							resize(line, n)
+							text_updated = true
+						} else if cursor.y + 1 < len(main_text) {
+							next_line := main_text[cursor.y + 1]
+							n := len(line^)
+							reserve(line, cursor.x + len(next_line))
+							resize(line, cursor.x)
+							for i in n ..< cursor.x {
+								line^[i] = ' '
+							}
+							append(line, ..next_line[:])
+							delete(next_line)
+							ordered_remove(&main_text, cursor.y + 1)
+							text_updated = true
 						}
-						resize(line, n)
-						text_updated = true
-					} else if cursor.y + 1 < len(main_text) {
-						next_line := main_text[cursor.y + 1]
-						n := len(line^)
-						reserve(line, cursor.x + len(next_line))
-						resize(line, cursor.x)
-						for i in n ..< cursor.x {
-							line^[i] = ' '
-						}
-						append(line, ..next_line[:])
-						delete(next_line)
-						ordered_remove(&main_text, cursor.y + 1)
-						text_updated = true
 					}
 				}
 			}
@@ -411,13 +415,21 @@ main :: proc() {
 			text_updated = false
 		}
 
-		rl.BeginDrawing()
-		rl.ClearBackground(rl.WHITE)
+		sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)
+		sdl.RenderClear(renderer)
+		sdl.SetRenderScale(renderer, 2, 2)
+		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
 		draw_text_and_cursor(main_text, cursor)
 
-		rl.DrawText(last_out, 480, 32, 30, last_ok ? rl.GREEN : rl.GRAY)
-		rl.DrawText(last_err, 480, 64, 30, rl.RED)
-		rl.EndDrawing()
+		if last_ok {
+			sdl.SetRenderDrawColor(renderer, 0, 191, 0, 255)
+		} else {
+			sdl.SetRenderDrawColor(renderer, 191, 191, 191, 255)
+		}
+		sdl.RenderDebugText(renderer, 320, 8, last_out)
+		sdl.SetRenderDrawColor(renderer, 191, 0, 0, 255)
+		sdl.RenderDebugText(renderer, 320, 16, last_err)
+		sdl.RenderPresent(renderer)
 	}
 }
 
