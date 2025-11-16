@@ -5,7 +5,7 @@ import "core:strings"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 
-Text :: [dynamic][dynamic]byte
+Text :: [dynamic][dynamic]rune
 
 WINDOW_PADDING :: 2
 
@@ -17,7 +17,7 @@ Window :: struct {
 InputWindow :: struct {
 	using window: Window,
 	text:         Text,
-	cursor:       [2]int, // -1 for non-editable
+	cursor:       [2]int,
 }
 
 renderer: ^sdl.Renderer
@@ -75,17 +75,14 @@ draw_input_window :: proc(w: InputWindow) {
 	// botright := w.botright - WINDOW_PADDING
 	offset: [2]f32
 	for line, row in w.text {
-		for col := 0; col < len(line); {
-			ch, ch_sz := utf8.decode_rune(line[col:])
-			defer col += ch_sz
+		for ch, col in line {
 			if row == w.cursor.y && col == w.cursor.x {
 				draw_cursor(topleft + offset, 0)
 			}
 			if ch != ' ' && ch != '\t' {
 				ch0: [5]byte
-				for i in 0 ..< ch_sz {
-					ch0[i] = line[col + i]
-				}
+				ch1, _ := utf8.encode_rune(ch)
+				for i in 0 ..< 4 do ch0[i] = ch1[i]
 				ch_cstr := cstring(raw_data(ch0[:]))
 				xy := topleft + offset
 				sdl.RenderDebugText(renderer, xy.x, xy.y, ch_cstr)
@@ -103,6 +100,31 @@ draw_input_window :: proc(w: InputWindow) {
 		pos.y += f32(w.cursor.y) * 8
 		draw_cursor(pos, w.cursor.x)
 	}
+}
+
+ptr_at :: proc "contextless" (arr: []$T, #any_int pos: int) -> ^T {
+	out: ^T
+	if pos < len(arr) do out = &arr[pos]
+	return out
+}
+
+at_or_default :: proc "contextless" (arr: []$T, #any_int pos: int, default: T) -> T {
+	out := default
+	if pos < len(arr) do out = arr[pos]
+	return out
+}
+
+at_or_zero :: proc "contextless" (arr: []$T, #any_int pos: int) -> T {
+	return at_or_default(arr, pos, T{})
+}
+
+at :: proc {
+	at_or_default,
+	at_or_zero,
+}
+
+line_len :: proc(text: Text, row: int) -> int {
+	return len(at(text[:], row))
 }
 
 main :: proc() {
@@ -137,8 +159,8 @@ main :: proc() {
 		for row in input_window.text do delete(row)
 		delete(input_window.text)
 	}
-	append(&input_window.text, make([dynamic]byte))
-	append(&input_window.text[0], "(+ 1 1)")
+	append(&input_window.text, make([dynamic]rune))
+	for ch in "(+ 1 1)" do append(&input_window.text[0], ch)
 
 	main_loop: for {
 		ok = sdl.WaitEvent(nil)
@@ -152,12 +174,18 @@ main :: proc() {
 					resize(&input_window.text, input_window.cursor.y + 1)
 				}
 				line := &input_window.text[input_window.cursor.y]
-				for len(line^) < input_window.cursor.x {
-					append(line, ' ')
+				for len(line^) < input_window.cursor.x do append(line, ' ')
+				str := string(evt.text.text)
+				rune_count := utf8.rune_count(str)
+				n := len(line)
+				resize(line, n + rune_count)
+				for i := n - 1; i >= input_window.cursor.x; i -= 1 {
+					line[i + rune_count] = line[i]
 				}
-				str := transmute([]byte)cast(string)evt.text.text
-				inject_at(line, input_window.cursor.x, ..str)
-				input_window.cursor.x += len(str)
+				for ch in str {
+					line[input_window.cursor.x] = ch
+					input_window.cursor.x += 1
+				}
 				text_updated = true
 			case .KEY_DOWN:
 				switch evt.key.key {
@@ -174,17 +202,13 @@ main :: proc() {
 				case sdl.K_HOME:
 					input_window.cursor.x = 0
 				case sdl.K_END:
-					if input_window.cursor.y < len(input_window.text) {
-						input_window.cursor.x = len(input_window.text[input_window.cursor.y])
-					} else {
-						input_window.cursor.x = 0
-					}
+					input_window.cursor.x = line_len(input_window.text, input_window.cursor.y)
 				case sdl.K_RETURN:
-					if input_window.cursor.y < len(input_window.text) {
-						line := &input_window.text[input_window.cursor.y]
+					line := ptr_at(input_window.text[:], input_window.cursor.y)
+					if line != nil {
 						to_retain := min(input_window.cursor.x, len(line^))
 						to_move := max(len(line^) - input_window.cursor.x, 0)
-						new_line := make([dynamic]byte, 0, to_move)
+						new_line := make([dynamic]rune, 0, to_move)
 						append(&new_line, ..line^[to_retain:])
 						resize(line, to_retain)
 						inject_at(&input_window.text, input_window.cursor.y + 1, new_line)
@@ -193,58 +217,45 @@ main :: proc() {
 					input_window.cursor.y += 1
 					input_window.cursor.x = 0
 				case sdl.K_BACKSPACE:
-					if input_window.cursor.y < len(input_window.text) &&
-					   input_window.cursor.x <= len(input_window.text[input_window.cursor.y]) {
-						line := &input_window.text[input_window.cursor.y]
-						if input_window.cursor.x > 0 {
-							_, ch_sz := utf8.decode_last_rune(line^[:input_window.cursor.x])
-							input_window.cursor.x -= ch_sz
-							n := len(line^) - ch_sz
-							for i in input_window.cursor.x ..< n {
-								line^[i] = line^[i + ch_sz]
-							}
-							resize(line, n)
-							text_updated = true
-						} else if input_window.cursor.y > 0 {
-							input_window.cursor.y -= 1
-							prev_line := &input_window.text[input_window.cursor.y]
-							input_window.cursor.x = len(prev_line^)
-							append(prev_line, ..line^[:])
-							delete(line^)
-							ordered_remove(&input_window.text, input_window.cursor.y + 1)
-							text_updated = true
-						}
-					} else {
-						if input_window.cursor.x > 0 {
-							input_window.cursor.x -= 1
-						} else if input_window.cursor.y > 0 {
-							input_window.cursor.y -= 1
-						}
+					if input_window.cursor.x > line_len(input_window.text, input_window.cursor.y) {
+						input_window.cursor.x -= 1
+						break
+					}
+					if input_window.cursor.y >= len(input_window.text) {
+						input_window.cursor.y -= 1
+						input_window.cursor.x = line_len(input_window.text, input_window.cursor.y)
+						break
+					}
+					line := &input_window.text[input_window.cursor.y]
+					if input_window.cursor.x > 0 {
+						ordered_remove(line, input_window.cursor.x - 1)
+						input_window.cursor.x -= 1
+						text_updated = true
+					} else if input_window.cursor.y > 0 {
+						input_window.cursor.y -= 1
+						prev_line := &input_window.text[input_window.cursor.y]
+						input_window.cursor.x = len(prev_line^)
+						append(prev_line, ..line^[:])
+						delete(line^)
+						ordered_remove(&input_window.text, input_window.cursor.y + 1)
+						text_updated = true
 					}
 				case sdl.K_DELETE:
-					if input_window.cursor.y < len(input_window.text) {
-						line := &input_window.text[input_window.cursor.y]
-						if input_window.cursor.x < len(line^) {
-							_, ch_sz := utf8.decode_rune(line^[input_window.cursor.x:])
-							n := len(line^) - ch_sz
-							for i in input_window.cursor.x ..< n {
-								line^[i] = line^[i + ch_sz]
-							}
-							resize(line, n)
-							text_updated = true
-						} else if input_window.cursor.y + 1 < len(input_window.text) {
-							next_line := input_window.text[input_window.cursor.y + 1]
-							n := len(line^)
-							reserve(line, input_window.cursor.x + len(next_line))
-							resize(line, input_window.cursor.x)
-							for i in n ..< input_window.cursor.x {
-								line^[i] = ' '
-							}
-							append(line, ..next_line[:])
-							delete(next_line)
-							ordered_remove(&input_window.text, input_window.cursor.y + 1)
-							text_updated = true
-						}
+					line := ptr_at(input_window.text[:], input_window.cursor.y)
+					(line != nil) or_break
+					if input_window.cursor.x < len(line^) {
+						ordered_remove(line, input_window.cursor.x)
+						text_updated = true
+					} else if input_window.cursor.y + 1 < len(input_window.text) {
+						next_line := input_window.text[input_window.cursor.y + 1]
+						n := len(line^)
+						reserve(line, input_window.cursor.x + len(next_line))
+						resize(line, input_window.cursor.x)
+						for i in n ..< input_window.cursor.x do line^[i] = ' '
+						append(line, ..next_line[:])
+						delete(next_line)
+						ordered_remove(&input_window.text, input_window.cursor.y + 1)
+						text_updated = true
 					}
 				}
 			}

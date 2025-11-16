@@ -16,8 +16,7 @@ is_delimiter :: proc "contextless" (ch: rune) -> bool {
 next_rune :: proc "contextless" (text: Text, cursor: [2]int) -> ([2]int, rune) {
 	if cursor.y >= len(text) do return cursor, -1
 	if cursor.x >= len(text[cursor.y]) do return {0, cursor.y + 1}, '\n'
-	ch, ch_sz := utf8.decode_rune(text[cursor.y][cursor.x:])
-	return {cursor.x + ch_sz, cursor.y}, ch
+	return {cursor.x + 1, cursor.y}, text[cursor.y][cursor.x]
 }
 
 skip_spaces :: proc "contextless" (text: Text, cursor: [2]int) -> [2]int {
@@ -38,11 +37,12 @@ next_word :: proc(text: Text, cursor: [2]int) -> (out_cursor: [2]int, out: strin
 		out_cursor = cursor1
 	}
 	assert(cursor.y == out_cursor.y)
-	if cursor.x == out_cursor.x {
-		out = ""
-	} else {
-		out = string(text[cursor.y][cursor.x:out_cursor.x])
+	sbuf := make([dynamic]byte)
+	for ch in text[cursor.y][cursor.x:out_cursor.x] {
+		buf, sz := utf8.encode_rune(ch)
+		for i in 0 ..< sz do append(&sbuf, buf[i])
 	}
+	out = transmute(string)sbuf[:]
 	return
 }
 
@@ -112,6 +112,7 @@ interpret_array :: proc(
 				return cursor2, 0, false
 			} else {
 				cursor4, word := next_word(text, cursor2)
+				defer delete(word)
 				out_cursor = cursor4
 				switch word {
 				case "":
@@ -188,6 +189,7 @@ interpret :: proc(
 		out_cursor = cursor1
 	case:
 		cursor2, word := next_word(text, cursor1)
+		defer delete(word)
 		out_cursor, out, out_ok = cursor2, strconv.parse_i64(word)
 		if !out_ok {
 			fmt.sbprintln(
