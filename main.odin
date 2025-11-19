@@ -21,8 +21,8 @@ main :: proc() {
 	defer sdl.DestroyRenderer(renderer)
 
 	input_window: InputWindow
-	input_window.topleft = 8
-	input_window.botright = 320
+	input_window.pos.xy = 8
+	input_window.pos.zw = 320
 	last_out: cstring
 	last_err: cstring
 	last_ok: bool
@@ -52,7 +52,8 @@ main :: proc() {
 			case .KEY_DOWN:
 				if evt.key.key == sdl.K_ESCAPE do break main_loop
 			}
-			text_updated |= handle_event_input_window(&input_window, evt)
+			_, updated := on_event_input_window(&input_window, evt)
+			text_updated |= updated
 		}
 
 		if text_updated {
@@ -71,7 +72,7 @@ main :: proc() {
 
 		sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)
 		sdl.RenderClear(renderer)
-		sdl.SetRenderScale(renderer, 2, 2)
+		// sdl.SetRenderScale(renderer, 2, 2)
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
 		draw_input_window(input_window)
 

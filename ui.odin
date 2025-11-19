@@ -1,13 +1,19 @@
 package main
 
+import "core:math"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 
-WINDOW_PADDING :: 2
+WINDOW_PADDING :: 8
+WINDOW_HEADER :: 16
+GRID_SIZE :: 16
 
 Window :: struct {
-	topleft:  [2]f32,
-	botright: [2]f32,
+	pos:        [4]f32,
+	pos_start:  [4]f32,
+	drag_start: [2]f32,
+	ctrl_down:  bool,
+	dragging:   u8,
 }
 
 InputWindow :: struct {
@@ -26,31 +32,31 @@ draw_window_frame :: proc(w: Window) {
 	rect.w = WINDOW_PADDING
 	rect.h = WINDOW_PADDING
 	for i in 0 ..< 4 {
-		rect.x = ((i & 1) == 0) ? w.topleft.x : w.botright.x - WINDOW_PADDING
-		rect.y = ((i & 2) == 0) ? w.topleft.y : w.botright.y - WINDOW_PADDING
+		rect.x = ((i & 1) == 0) ? w.pos.x : w.pos.z - WINDOW_PADDING
+		rect.y = ((i & 2) == 0) ? w.pos.y : w.pos.w - WINDOW_PADDING
 		sdl.RenderFillRect(renderer, &rect)
 	}
-	rect.y = w.topleft.y + WINDOW_PADDING
+	rect.y = w.pos.y + WINDOW_PADDING
 	rect.w = WINDOW_PADDING
-	rect.h = w.botright.y - w.topleft.y - 2 * WINDOW_PADDING
-	rect.x = w.topleft.x
+	rect.h = w.pos.w - w.pos.y - 2 * WINDOW_PADDING
+	rect.x = w.pos.x
 	sdl.RenderFillRect(renderer, &rect)
-	rect.x = w.botright.x - WINDOW_PADDING
+	rect.x = w.pos.z - WINDOW_PADDING
 	sdl.RenderFillRect(renderer, &rect)
 
-	rect.x = w.topleft.x + WINDOW_PADDING
-	rect.w = w.botright.x - w.topleft.x - 2 * WINDOW_PADDING
+	rect.x = w.pos.x + WINDOW_PADDING
+	rect.w = w.pos.z - w.pos.x - 2 * WINDOW_PADDING
 	rect.h = WINDOW_PADDING
-	rect.y = w.topleft.y
+	rect.y = w.pos.y
 	sdl.RenderFillRect(renderer, &rect)
-	rect.y = w.botright.y - WINDOW_PADDING
+	rect.y = w.pos.w - WINDOW_PADDING
 	sdl.RenderFillRect(renderer, &rect)
 
 	sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)
-	rect.x = w.topleft.x + WINDOW_PADDING
-	rect.y = w.topleft.y + WINDOW_PADDING
-	rect.w = w.botright.x - w.topleft.x - 2 * WINDOW_PADDING
-	rect.h = w.botright.y - w.topleft.y - 2 * WINDOW_PADDING
+	rect.x = w.pos.x + WINDOW_PADDING
+	rect.y = w.pos.y + WINDOW_PADDING
+	rect.w = w.pos.z - w.pos.x - 2 * WINDOW_PADDING
+	rect.h = w.pos.w - w.pos.y - 2 * WINDOW_PADDING
 	sdl.RenderFillRect(renderer, &rect)
 }
 
@@ -65,8 +71,23 @@ draw_cursor :: proc(pos: [2]f32, padding: int) {
 
 draw_input_window :: proc(w: InputWindow) {
 	draw_window_frame(w)
-	topleft := w.topleft + WINDOW_PADDING + 4
-	// botright := w.botright - WINDOW_PADDING
+	og_clip_rect: sdl.Rect
+	og_clip_rect_ptr: ^sdl.Rect
+	if sdl.RenderClipEnabled(renderer) {
+		og_clip_rect_ptr = &og_clip_rect
+		sdl.GetRenderClipRect(renderer, og_clip_rect_ptr)
+	}
+	defer sdl.SetRenderClipRect(renderer, og_clip_rect_ptr)
+
+	clip_rect: sdl.Rect
+	clip_rect.x = i32(w.pos.x + WINDOW_PADDING)
+	clip_rect.y = i32(w.pos.y + WINDOW_PADDING)
+	clip_rect.w = i32(w.pos.z - w.pos.x - 2 * WINDOW_PADDING)
+	clip_rect.h = i32(w.pos.w - w.pos.y - 2 * WINDOW_PADDING)
+	sdl.SetRenderClipRect(renderer, &clip_rect)
+
+	topleft := w.pos.xy + WINDOW_PADDING + 4
+	// botright := w.pos.zw - WINDOW_PADDING
 	offset: [2]f32
 	for line, row in w.text {
 		for ch, col in line {
@@ -96,7 +117,57 @@ draw_input_window :: proc(w: InputWindow) {
 	}
 }
 
-handle_event_input_window :: proc(w: ^InputWindow, evt: sdl.Event) -> (updated: bool) {
+on_event_window :: proc(w: ^Window, evt: sdl.Event) -> (consumed: bool) {
+	#partial switch evt.type {
+	case .MOUSE_BUTTON_DOWN:
+		if evt.button.button != sdl.BUTTON_LEFT do break
+		if w.pos.x > evt.button.x || evt.button.x > w.pos.z do break
+		if w.pos.y > evt.button.y || evt.button.y > w.pos.w do break
+
+		consumed = true
+		w.dragging = 0
+		if evt.button.x <= w.pos.x + WINDOW_PADDING do w.dragging |= 1
+		if evt.button.y <= w.pos.y + WINDOW_PADDING do w.dragging |= 2
+		if evt.button.x >= w.pos.z - WINDOW_PADDING do w.dragging |= 4
+		if evt.button.y >= w.pos.w - WINDOW_PADDING do w.dragging |= 8
+		if w.dragging == 0 do w.dragging = 15
+		w.pos_start = w.pos
+		w.drag_start.x = evt.button.x
+		w.drag_start.y = evt.button.y
+
+	case .MOUSE_BUTTON_UP:
+		if evt.button.button != sdl.BUTTON_LEFT do break
+		if w.dragging == 0 do break
+		consumed = true
+		w.dragging = 0
+
+	case .KEY_DOWN:
+		if evt.key.key == sdl.K_LCTRL do w.ctrl_down = true
+
+	case .KEY_UP:
+		if evt.key.key == sdl.K_LCTRL do w.ctrl_down = false
+
+	case .MOUSE_MOTION:
+		if w.dragging == 0 do break
+		consumed = true
+		mouse_pos := [2]f32{evt.motion.x, evt.motion.y}
+		for i in 0 ..< uint(4) {
+			if w.dragging & (1 << i) == 0 do continue
+			w.pos[i] = w.pos_start[i] + mouse_pos[i & 1] - w.drag_start[i & 1]
+			if w.ctrl_down do w.pos[i] = math.round(w.pos[i] / GRID_SIZE) * GRID_SIZE
+			if i < 2 {
+				w.pos[i] = min(w.pos[i + 2] - 2 * WINDOW_PADDING, w.pos[i])
+			} else {
+				w.pos[i] = max(w.pos[i - 2] + 2 * WINDOW_PADDING, w.pos[i])
+			}
+		}
+	}
+	return
+}
+
+on_event_input_window :: proc(w: ^InputWindow, evt: sdl.Event) -> (consumed, updated: bool) {
+	consumed |= on_event_window(w, evt)
+	if consumed do return
 	#partial switch evt.type {
 	case .TEXT_INPUT:
 		if len(w.text) <= w.cursor.y {
