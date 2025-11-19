@@ -22,6 +22,11 @@ InputWindow :: struct {
 	cursor:       [2]int,
 }
 
+OutputWindow :: struct {
+	using window: Window,
+	text:         string,
+}
+
 draw_window_frame :: proc(w: Window) {
 	ogc: [4]u8
 	sdl.GetRenderDrawColor(renderer, &ogc.x, &ogc.y, &ogc.z, &ogc.w)
@@ -60,6 +65,24 @@ draw_window_frame :: proc(w: Window) {
 	sdl.RenderFillRect(renderer, &rect)
 }
 
+set_window_clip_rect :: proc(w: Window) {
+	clip_rect: sdl.Rect
+	clip_rect.x = i32(w.pos.x + WINDOW_PADDING)
+	clip_rect.y = i32(w.pos.y + WINDOW_PADDING)
+	clip_rect.w = i32(w.pos.z - w.pos.x - 2 * WINDOW_PADDING)
+	clip_rect.h = i32(w.pos.w - w.pos.y - 2 * WINDOW_PADDING)
+	sdl.SetRenderClipRect(renderer, &clip_rect)
+}
+
+draw_rune :: proc(pos: [2]f32, ch: rune) {
+	if ch == ' ' || ch == '\t' do return
+	ch0: [5]byte
+	ch1, _ := utf8.encode_rune(ch)
+	for i in 0 ..< 4 do ch0[i] = ch1[i]
+	ch_cstr := cstring(raw_data(ch0[:]))
+	sdl.RenderDebugText(renderer, pos.x, pos.y, ch_cstr)
+}
+
 draw_cursor :: proc(pos: [2]f32, padding: int) {
 	rect: sdl.FRect
 	rect.x = pos.x + f32(padding) * 8 - 2
@@ -78,13 +101,7 @@ draw_input_window :: proc(w: InputWindow) {
 		sdl.GetRenderClipRect(renderer, og_clip_rect_ptr)
 	}
 	defer sdl.SetRenderClipRect(renderer, og_clip_rect_ptr)
-
-	clip_rect: sdl.Rect
-	clip_rect.x = i32(w.pos.x + WINDOW_PADDING)
-	clip_rect.y = i32(w.pos.y + WINDOW_PADDING)
-	clip_rect.w = i32(w.pos.z - w.pos.x - 2 * WINDOW_PADDING)
-	clip_rect.h = i32(w.pos.w - w.pos.y - 2 * WINDOW_PADDING)
-	sdl.SetRenderClipRect(renderer, &clip_rect)
+	set_window_clip_rect(w)
 
 	topleft := w.pos.xy + WINDOW_PADDING + 4
 	// botright := w.pos.zw - WINDOW_PADDING
@@ -94,14 +111,7 @@ draw_input_window :: proc(w: InputWindow) {
 			if row == w.cursor.y && col == w.cursor.x {
 				draw_cursor(topleft + offset, 0)
 			}
-			if ch != ' ' && ch != '\t' {
-				ch0: [5]byte
-				ch1, _ := utf8.encode_rune(ch)
-				for i in 0 ..< 4 do ch0[i] = ch1[i]
-				ch_cstr := cstring(raw_data(ch0[:]))
-				xy := topleft + offset
-				sdl.RenderDebugText(renderer, xy.x, xy.y, ch_cstr)
-			}
+			draw_rune(topleft + offset, ch)
 			offset.x += 8
 		}
 		if row == w.cursor.y && len(line) <= w.cursor.x {
@@ -114,6 +124,31 @@ draw_input_window :: proc(w: InputWindow) {
 		pos := topleft
 		pos.y += f32(w.cursor.y) * 8
 		draw_cursor(pos, w.cursor.x)
+	}
+}
+
+draw_output_window :: proc(w: OutputWindow) {
+	draw_window_frame(w)
+	og_clip_rect: sdl.Rect
+	og_clip_rect_ptr: ^sdl.Rect
+	if sdl.RenderClipEnabled(renderer) {
+		og_clip_rect_ptr = &og_clip_rect
+		sdl.GetRenderClipRect(renderer, og_clip_rect_ptr)
+	}
+	defer sdl.SetRenderClipRect(renderer, og_clip_rect_ptr)
+	set_window_clip_rect(w)
+
+	topleft := w.pos.xy + WINDOW_PADDING + 4
+	// botright := w.pos.zw - WINDOW_PADDING
+	offset: [2]f32
+	for ch in w.text {
+		if ch == '\n' {
+			offset.x = 0
+			offset.y += 8
+			continue
+		}
+		draw_rune(topleft + offset, ch)
+		offset.x += 8
 	}
 }
 

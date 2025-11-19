@@ -20,11 +20,19 @@ main :: proc() {
 	assert(renderer != nil)
 	defer sdl.DestroyRenderer(renderer)
 
-	input_window: InputWindow
-	input_window.pos.xy = 8
-	input_window.pos.zw = 320
-	last_out: cstring
-	last_err: cstring
+	window_in: InputWindow
+	window_out: OutputWindow
+	window_err: OutputWindow
+	window_in.pos.xy = 16
+	window_in.pos.zw = 336
+	window_out.pos.x = 352
+	window_out.pos.y = 16
+	window_out.pos.z = 672
+	window_out.pos.w = 48
+	window_err.pos.x = 352
+	window_err.pos.y = 64
+	window_err.pos.z = 672
+	window_err.pos.w = 368
 	last_ok: bool
 	text_updated := true
 
@@ -36,11 +44,11 @@ main :: proc() {
 	defer strings.builder_destroy(&err_log)
 
 	defer {
-		for row in input_window.text do delete(row)
-		delete(input_window.text)
+		for row in window_in.text do delete(row)
+		delete(window_in.text)
 	}
-	append(&input_window.text, make([dynamic]rune))
-	for ch in "(+ 1 1)" do append(&input_window.text[0], ch)
+	append(&window_in.text, make([dynamic]rune))
+	for ch in "(+ 1 1)" do append(&window_in.text[0], ch)
 
 	main_loop: for {
 		ok = sdl.WaitEvent(nil)
@@ -52,20 +60,23 @@ main :: proc() {
 			case .KEY_DOWN:
 				if evt.key.key == sdl.K_ESCAPE do break main_loop
 			}
-			_, updated := on_event_input_window(&input_window, evt)
+			consumed1, updated := on_event_input_window(&window_in, evt)
+			consumed2 := consumed1 || on_event_window(&window_out, evt)
+			if !consumed2 do on_event_window(&window_err, evt)
 			text_updated |= updated
 		}
 
 		if text_updated {
 			new_result: i64
 			strings.builder_reset(&err_log)
-			_, new_result, ok = interpret(&err_log, input_window.text, 0)
+			_, new_result, ok = interpret(&err_log, window_in.text, 0)
 			if ok {
 				strings.builder_reset(&out_log)
 				fmt.sbprint(&out_log, new_result)
-				last_out = strings.to_cstring(&out_log)
+				window_out.text = strings.to_string(out_log)
+				fmt.sbprint(&err_log, "Everything OK")
 			}
-			last_err = strings.to_cstring(&err_log)
+			window_err.text = strings.to_string(err_log)
 			last_ok = ok
 			text_updated = false
 		}
@@ -74,16 +85,20 @@ main :: proc() {
 		sdl.RenderClear(renderer)
 		// sdl.SetRenderScale(renderer, 2, 2)
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
-		draw_input_window(input_window)
+		draw_input_window(window_in)
 
 		if last_ok {
 			sdl.SetRenderDrawColor(renderer, 0, 191, 0, 255)
 		} else {
 			sdl.SetRenderDrawColor(renderer, 191, 191, 191, 255)
 		}
-		sdl.RenderDebugText(renderer, 320, 8, last_out)
-		sdl.SetRenderDrawColor(renderer, 191, 0, 0, 255)
-		sdl.RenderDebugText(renderer, 320, 16, last_err)
+		draw_output_window(window_out)
+		if last_ok {
+			sdl.SetRenderDrawColor(renderer, 191, 191, 191, 255)
+		} else {
+			sdl.SetRenderDrawColor(renderer, 191, 0, 0, 255)
+		}
+		draw_output_window(window_err)
 		sdl.RenderPresent(renderer)
 	}
 }
