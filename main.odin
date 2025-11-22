@@ -32,7 +32,7 @@ main :: proc() {
 	window_err.pos.x = 352
 	window_err.pos.y = 64
 	window_err.pos.z = 672
-	window_err.pos.w = 368
+	window_err.pos.w = 336
 	last_ok: bool
 	text_updated := true
 
@@ -102,4 +102,3 @@ main :: proc() {
 		sdl.RenderPresent(renderer)
 	}
 }
-

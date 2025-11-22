@@ -5,47 +5,6 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
-is_space :: proc "contextless" (ch: rune) -> bool {
-	return ch == ' ' || ch == '\t' || ch == '\n'
-}
-
-is_delimiter :: proc "contextless" (ch: rune) -> bool {
-	return is_space(ch) || ch == '(' || ch == ')'
-}
-
-next_rune :: proc "contextless" (text: Text, cursor: [2]int) -> ([2]int, rune) {
-	if cursor.y >= len(text) do return cursor, -1
-	if cursor.x >= len(text[cursor.y]) do return {0, cursor.y + 1}, '\n'
-	return {cursor.x + 1, cursor.y}, text[cursor.y][cursor.x]
-}
-
-skip_spaces :: proc "contextless" (text: Text, cursor: [2]int) -> [2]int {
-	cursor := cursor
-	for {
-		cursor1, ch := next_rune(text, cursor)
-		if !is_space(ch) do break
-		cursor = cursor1
-	}
-	return cursor
-}
-
-next_word :: proc(text: Text, cursor: [2]int) -> (out_cursor: [2]int, out: string) {
-	out_cursor = cursor
-	for {
-		cursor1, ch := next_rune(text, out_cursor)
-		if ch == -1 || is_delimiter(ch) do break
-		out_cursor = cursor1
-	}
-	assert(cursor.y == out_cursor.y)
-	sbuf := make([dynamic]byte)
-	for ch in text[cursor.y][cursor.x:out_cursor.x] {
-		buf, sz := utf8.encode_rune(ch)
-		for i in 0 ..< sz do append(&sbuf, buf[i])
-	}
-	out = transmute(string)sbuf[:]
-	return
-}
-
 read_uint :: proc "contextless" (
 	text: Text,
 	cursor: [2]int,
@@ -177,6 +136,11 @@ interpret :: proc(
 	out: i64,
 	out_ok: bool,
 ) {
+	tree: VTree
+	out_cursor, tree, out_ok = parse_vtree(err_log, text, cursor)
+	if !out_ok do return
+	defer delete_vtree(tree)
+
 	cursor1 := skip_spaces(text, cursor)
 	_, ch := next_rune(text, cursor)
 	switch ch {
