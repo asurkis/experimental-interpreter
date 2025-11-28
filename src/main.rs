@@ -1,7 +1,7 @@
-use crate::interpreter::parse_interpret;
-
 mod interpreter;
 mod parser;
+
+use interpreter::parse_interpret;
 
 #[derive(Debug, Clone, Default)]
 struct MyApp {

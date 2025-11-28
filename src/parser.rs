@@ -3,9 +3,9 @@ use std::iter::Peekable;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
-pub enum Value {
+pub enum Tree {
     Atom(String),
-    Array(Vec<Value>),
+    Array(Vec<Tree>),
     Int64(i64),
 }
 
@@ -29,7 +29,7 @@ fn next_word(iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>) ->
 fn parse_array(
     err_log: &mut String,
     iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Option<Vec<Value>> {
+) -> Option<Vec<Tree>> {
     let Some((line1, col1, '(')) = iter.next() else {
         panic!()
     };
@@ -61,7 +61,7 @@ fn parse_array(
 fn parse_value(
     err_log: &mut String,
     iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Option<Value> {
+) -> Option<Tree> {
     match iter.peek() {
         None => {
             writeln!(err_log, "Unexpected EOF").unwrap();
@@ -71,19 +71,19 @@ fn parse_value(
             writeln!(err_log, "Unbalanced bracket at {line}:{col}").unwrap();
             None
         }
-        Some((_, _, '(')) => parse_array(err_log, iter).map(Value::Array),
+        Some((_, _, '(')) => parse_array(err_log, iter).map(Tree::Array),
         Some(_) => {
             let word = next_word(iter);
             if let Ok(x) = word.parse::<i64>() {
-                Some(Value::Int64(x))
+                Some(Tree::Int64(x))
             } else {
-                Some(Value::Atom(word))
+                Some(Tree::Atom(word))
             }
         }
     }
 }
 
-impl FromStr for Value {
+impl FromStr for Tree {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut iter = s
