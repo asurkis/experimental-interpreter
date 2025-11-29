@@ -1,3 +1,4 @@
+use crate::declare_enum_as;
 use std::fmt::Write;
 use std::iter::Peekable;
 use std::str::FromStr;
@@ -8,6 +9,11 @@ pub enum Tree {
     Array(Vec<Tree>),
     Int64(i64),
 }
+
+// enum_as!(Tree, as_atom, Atom(x), String);
+declare_enum_as!(Tree, as_atom &Atom(x) -> String);
+// enum_as!(Tree, as_array_ref &Array(x) -> Vec<Tree>);
+// enum_as!(Tree, as_int copy Int64(x) -> i64);
 
 fn skip_whitespace(iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>) {
     while iter.next_if(|(_, _, c)| c.is_whitespace()).is_some() {}
