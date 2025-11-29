@@ -1,4 +1,18 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash};
+
+#[macro_export]
+macro_rules! source_loc {
+    () => {
+        concat!(file!(), ":", line!(), ":", column!())
+    };
+}
+
+#[macro_export]
+macro_rules! guard_opt {
+    ($e:expr) => {
+        (if $e { Some(()) } else { None })?
+    };
+}
 
 #[macro_export]
 macro_rules! guard {
@@ -10,40 +24,82 @@ macro_rules! guard {
                 "Guard fail ",
                 stringify!($e),
                 " at ",
-                file!(),
-                ":",
-                line!(),
-                ":",
-                column!()
+                $crate::source_loc!(),
+                "\n",
             ))
+        })?
+    };
+
+    ($logger:expr, $e:expr) => {
+        (if $e {
+            Some(())
+        } else {
+            $logger.push_str(concat!(
+                "Guard fail ",
+                stringify!($e),
+                " at ",
+                $crate::source_loc!(),
+                "\n",
+            ));
+            None
         })?
     };
 }
 
 #[macro_export]
 macro_rules! match_ok {
-    ($e:expr, $p:pat => $r:expr) => {
+    ($e:expr, $p:pat $(if $g:expr)? => $r:expr) => {
         match $e {
-            $p => Ok($r),
+            $p $(if $g)? => Ok($r),
             _ => Err(concat!(
                 "Match fail: ",
                 stringify!($e),
                 " as ",
                 stringify!($p),
                 " at ",
-                file!(),
-                ":",
-                line!(),
-                ":",
-                column!()
+                $crate::source_loc!(),
+                "\n",
             )),
+        }
+    };
+
+    ($logger:expr, $e:expr, $p:pat $(if $g:expr)? => $r:expr) => {
+        match $e {
+            $p $(if $g)? => Some($r),
+            _ => {
+                $logger.push_str(concat!(
+                    "Match fail: ",
+                    stringify!($e),
+                    " as ",
+                    stringify!($p),
+                    " at ",
+                    $crate::source_loc!(),
+                    "\n",
+                ));
+                None
+            }
         }
     };
 }
 
-pub fn replace_or_remove<K: Eq + Hash + Copy, V>(map: &mut HashMap<K, V>, key: K, item: Option<V>) {
+pub fn insert_or_remove<K: Eq + Hash + Copy, V>(
+    map: &mut HashMap<K, V>,
+    key: K,
+    item: Option<V>,
+) -> Option<V> {
     match item {
         None => map.remove(&key),
         Some(val) => map.insert(key, val),
-    };
+    }
+}
+
+pub fn ok_or_log<T, E: Borrow<str>>(error_log: &mut String, res: Result<T, E>) -> Option<T> {
+    match res {
+        Ok(x) => Some(x),
+        Err(err) => {
+            error_log.push_str(err.borrow());
+            error_log.push('\n');
+            None
+        }
+    }
 }

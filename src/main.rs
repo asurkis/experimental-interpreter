@@ -2,7 +2,11 @@ mod interpreter;
 mod parser;
 mod util;
 
+use std::str::FromStr;
+
 use interpreter::parse_interpret;
+
+use crate::{interpreter::TypedTree, parser::Tree};
 
 #[derive(Debug, Clone, Default)]
 struct MyApp {
@@ -31,9 +35,11 @@ impl eframe::App for MyApp {
             self.input_changed |= ui.code_editor(&mut self.text_input).changed();
         });
         if self.input_changed {
-            match parse_interpret(&self.text_input) {
-                Ok(val) => {
-                    self.last_out = format!("{val:?}");
+            let result = Tree::from_str(&self.text_input)
+                .and_then(|tree| Ok(format!("{:?}", TypedTree::try_from(&tree)?)));
+            match result {
+                Ok(ok) => {
+                    self.last_out = ok;
                     self.last_err.clear();
                     self.last_ok = true;
                 }
