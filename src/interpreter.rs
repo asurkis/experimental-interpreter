@@ -1,6 +1,6 @@
-use crate::declare_enum_as;
 use crate::parser::Tree;
 use crate::util::replace_or_remove;
+use crate::{guard, match_ok};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
@@ -33,13 +33,6 @@ impl TypeInfo {
     }
 }
 
-declare_enum_as!(Value, as_int64 copy Int64(x) -> i64);
-declare_enum_as!(Value, into_type Type(x) -> TypeInfo);
-declare_enum_as!(Value, as_type &Type(x) -> TypeInfo);
-declare_enum_as!(Value, into_array Array(x) -> Vec<Value>);
-// enum_as!(Value, as_array_ref &Array(x) -> Vec<Value>);
-declare_enum_as!(Value, as_array_mut &mut Array(x) -> Vec<Value>);
-
 fn interpret<'a>(ctx: &mut Context<'a>, tree: &'a Tree) -> Result<Value, String> {
     match tree {
         Tree::Atom(var) => ctx
@@ -48,66 +41,59 @@ fn interpret<'a>(ctx: &mut Context<'a>, tree: &'a Tree) -> Result<Value, String>
             .cloned()
             .ok_or_else(|| format!("Unknown variable {var:?}")),
         Tree::Array(arr) => {
-            if arr.is_empty() {
-                return Err("Empty array".into());
-            }
+            guard!(!arr.is_empty());
             match &arr[0] {
                 Tree::Atom(s) => match &s[..] {
                     "+" => {
-                        let mut acc = interpret(ctx, &arr[1])?.as_int64()?;
+                        let mut acc = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(x) => x)?;
                         for x in &arr[2..] {
-                            acc = acc.wrapping_add(interpret(ctx, x)?.as_int64()?);
+                            let y = match_ok!(interpret(ctx, x)?, Value::Int64(y) => y)?;
+                            acc = acc.wrapping_add(y);
                         }
                         Ok(Value::Int64(acc))
                     }
                     "-" => {
-                        let mut acc = interpret(ctx, &arr[1])?.as_int64()?;
+                        let mut acc = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(x) => x)?;
                         for x in &arr[2..] {
-                            acc = acc.wrapping_sub(interpret(ctx, x)?.as_int64()?);
+                            let y = match_ok!(interpret(ctx, x)?, Value::Int64(y) => y)?;
+                            acc = acc.wrapping_sub(y);
                         }
                         Ok(Value::Int64(acc))
                     }
                     "*" => {
-                        let mut acc = interpret(ctx, &arr[1])?.as_int64()?;
+                        let mut acc = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(y) => y)?;
                         for x in &arr[2..] {
-                            acc = acc.wrapping_mul(interpret(ctx, x)?.as_int64()?);
+                            let y = match_ok!(interpret(ctx, x)?, Value::Int64(y) => y)?;
+                            acc = acc.wrapping_mul(y);
                         }
                         Ok(Value::Int64(acc))
                     }
                     "/" => {
-                        let mut acc = interpret(ctx, &arr[1])?.as_int64()?;
+                        let mut acc = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(y) => y)?;
                         for x in &arr[2..] {
-                            let y = interpret(ctx, x)?.as_int64()?;
-                            if y == 0 {
-                                return Err("Division by zero".into());
-                            }
+                            let y = match_ok!(interpret(ctx, x)?, Value::Int64(y) => y)?;
+                            guard!(y != 0);
                             acc /= y;
                         }
                         Ok(Value::Int64(acc))
                     }
                     "let" => {
-                        if arr.len() != 4 {
-                            return Err("Variable binding must have variable name, value, and expression where the variable is used".into());
-                        }
-                        let var = arr[1].as_atom()?;
+                        guard!(arr.len() == 4);
+                        let var = match_ok!(&arr[1], Tree::Atom(x) => x)?;
                         let val = interpret(ctx, &arr[2])?;
-                        let old_val = ctx.variables.insert(&var[..], val);
+                        let old_val = ctx.variables.insert(var, val);
                         let body = interpret(ctx, &arr[3]);
-                        replace_or_remove(&mut ctx.variables, &var[..], old_val);
+                        replace_or_remove(&mut ctx.variables, var, old_val);
                         body
                     }
                     "var" => {
-                        if arr.len() != 4 {
-                            return Err(
-                                "Variable declaration must have variable, name, type and expression where the variable is used".into()
-                            );
-                        }
-                        let var = arr[1].as_atom()?;
+                        guard!(arr.len() == 4);
+                        let var = match_ok!(&arr[1], Tree::Atom(x) => x)?;
                         let typ_val = interpret(ctx, &arr[2])?;
-                        let typ = typ_val.as_type()?;
-                        let old_val = ctx.variables.insert(&var[..], typ.zero());
+                        let typ = match_ok!(&typ_val, Value::Type(x) => x)?;
+                        let old_val = ctx.variables.insert(var, typ.zero());
                         let body = interpret(ctx, &arr[3]);
-                        replace_or_remove(&mut ctx.variables, &var[..], old_val);
+                        replace_or_remove(&mut ctx.variables, var, old_val);
                         body
                     }
                     "seq" => {
@@ -118,10 +104,8 @@ fn interpret<'a>(ctx: &mut Context<'a>, tree: &'a Tree) -> Result<Value, String>
                         Ok(out)
                     }
                     "set" => {
-                        if arr.len() != 3 {
-                            return Err("Need variable name and new value".into());
-                        }
-                        let var = arr[1].as_atom()?;
+                        guard!(arr.len() == 3);
+                        let var = match_ok!(&arr[1], Tree::Atom(x) => x)?;
                         let val = interpret(ctx, &arr[2])?;
                         let pos = ctx
                             .variables
@@ -138,39 +122,29 @@ fn interpret<'a>(ctx: &mut Context<'a>, tree: &'a Tree) -> Result<Value, String>
                         Ok(Value::Array(out))
                     }
                     "array-t" => {
-                        if arr.len() != 2 {
-                            return Err("Argument count mismatch".into());
-                        }
-                        let inner = interpret(ctx, &arr[1])?.into_type()?;
+                        guard!(arr.len() == 2);
+                        let inner = match_ok!(interpret(ctx, &arr[1])?, Value::Type(x) => x)?;
                         Ok(Value::Type(TypeInfo::Array(Box::new(inner))))
                     }
                     "array-get" => {
-                        if arr.len() != 3 {
-                            return Err("Argument count mismatch".into());
-                        }
-                        let index = interpret(ctx, &arr[1])?.as_int64()?;
-                        let mut array = interpret(ctx, &arr[2])?.into_array()?;
-                        if index < 0 || index as usize >= array.len() {
-                            return Err(format!("Index out of bounds: {index}"));
-                        }
+                        guard!(arr.len() == 3);
+                        let index = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(x) => x)?;
+                        let mut array = match_ok!(interpret(ctx, &arr[2])?, Value::Array(x) => x)?;
+                        guard!(0 <= index && (index as usize) < array.len());
                         Ok(array.swap_remove(index as usize))
                     }
                     "array-set" => {
-                        if arr.len() != 4 {
-                            return Err("Argument count mismatch".into());
-                        }
+                        guard!(arr.len() == 4);
                         let val = interpret(ctx, &arr[3])?;
-                        let index = interpret(ctx, &arr[1])?.as_int64()?;
-                        let var = arr[2].as_atom()?;
-                        let array_pos = ctx
+                        let index = match_ok!(interpret(ctx, &arr[1])?, Value::Int64(x) => x)?;
+                        let var = match_ok!(&arr[2], Tree::Atom(x) => x)?;
+                        let array_mut_val = ctx
                             .variables
                             .get_mut(&var[..])
-                            .ok_or_else(|| format!("Array {var:?} not found"))?
-                            .as_array_mut()?;
-                        if index < 0 || index as usize >= array_pos.len() {
-                            return Err(format!("Index out of bounds: {index}"));
-                        }
-                        array_pos[index as usize] = val;
+                            .ok_or_else(|| format!("Array {var:?} not found"))?;
+                        let array_mut = match_ok!(array_mut_val, Value::Array(x) => x)?;
+                        guard!(0 <= index && (index as usize) < array_mut.len());
+                        array_mut[index as usize] = val;
                         Ok(Value::Unit)
                     }
                     _ => Err(format!("Unknown function {s}")),

@@ -1,48 +1,42 @@
 use std::{collections::HashMap, hash::Hash};
 
 #[macro_export]
-macro_rules! declare_enum_as {
-    ($enum_name:ty, $fn_name:ident $variant_name:ident($($inner:ident),+) -> $out_type:ty) => {
-        impl $enum_name {
-            pub fn $fn_name(self) -> ::core::result::Result<$out_type, &'static str> {
-                match self {
-                    Self::$variant_name($($inner),+) => ::core::result::Result::Ok(($($inner),+)),
-                    _ => ::core::result::Result::Err(concat!(stringify!($variant_name), " expected")),
-                }
-            }
-        }
+macro_rules! guard {
+    ($e:expr) => {
+        (if $e {
+            Ok(())
+        } else {
+            Err(concat!(
+                "Guard fail ",
+                stringify!($e),
+                " at ",
+                file!(),
+                ":",
+                line!(),
+                ":",
+                column!()
+            ))
+        })?
     };
+}
 
-    ($enum_name:ty, $fn_name:ident &$variant_name:ident($($inner:ident),+) -> $out_type:ty) => {
-        impl $enum_name {
-            pub fn $fn_name(&self) -> ::core::result::Result<&$out_type, &'static str> {
-                match self {
-                    Self::$variant_name($($inner),+) => ::core::result::Result::Ok(($($inner),+)),
-                    _ => ::core::result::Result::Err(concat!(stringify!($variant_name), " expected")),
-                }
-            }
-        }
-    };
-
-    ($enum_name:ty, $fn_name:ident &mut $variant_name:ident($($inner:ident),+) -> $out_type:ty) => {
-        impl $enum_name {
-            pub fn $fn_name(&mut self) -> ::core::result::Result<&mut $out_type, &'static str> {
-                match self {
-                    Self::$variant_name($($inner),+) => ::core::result::Result::Ok(($($inner),+)),
-                    _ => ::core::result::Result::Err(concat!(stringify!($variant_name), " expected")),
-                }
-            }
-        }
-    };
-
-    ($enum_name:ty, $fn_name:ident copy $variant_name:ident($($inner:ident),+) -> $out_type:ty) => {
-        impl $enum_name {
-            pub fn $fn_name(&self) -> ::core::result::Result<$out_type, &'static str> {
-                match self {
-                    Self::$variant_name($($inner),+) => ::core::result::Result::Ok(($(*$inner),+)),
-                    _ => ::core::result::Result::Err(concat!(stringify!($variant_name), " expected")),
-                }
-            }
+#[macro_export]
+macro_rules! match_ok {
+    ($e:expr, $p:pat => $r:expr) => {
+        match $e {
+            $p => Ok($r),
+            _ => Err(concat!(
+                "Match fail: ",
+                stringify!($e),
+                " as ",
+                stringify!($p),
+                " at ",
+                file!(),
+                ":",
+                line!(),
+                ":",
+                column!()
+            )),
         }
     };
 }
