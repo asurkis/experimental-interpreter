@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod syntax_tree;
 mod token_tree;
 mod typed_tree;
