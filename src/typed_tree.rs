@@ -1,5 +1,5 @@
-use crate::parser::Tree;
-use crate::phase2::{ArithmeticOp, Tree2};
+use crate::syntax_tree::{ArithmeticOp, Tree2};
+use crate::token_tree::Tree;
 use crate::util::insert_or_remove;
 use crate::{guard, match_ok};
 use std::collections::HashMap;

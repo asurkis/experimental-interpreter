@@ -1,9 +1,9 @@
-mod interpreter;
-mod parser;
-mod phase2;
+mod syntax_tree;
+mod token_tree;
+mod typed_tree;
 mod util;
 
-use crate::interpreter::parse_interpret;
+use crate::typed_tree::parse_interpret;
 
 #[derive(Debug, Clone, Default)]
 struct MyApp {
